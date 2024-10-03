@@ -35,14 +35,13 @@ def main(env_id,
 	
 	modelpath = f"./1000000"
 	model.load(modelpath)
-
-	success_rate, average_returns = model.test(env, 100)
+	model.test(env)
 	a = 1
 
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument('--env_id', type=str, default='Hopper-v3') 
+    parser.add_argument('--env_id', type=str, default='Humanoid-v3') 
     parser.add_argument('--algo', type=str, default='TD3') 
     parser.add_argument('--n_envs', type=int, default=1)
     parser.add_argument('--iter_num', type=int, default=2) # One iter will be timestep=batch_size=1e6

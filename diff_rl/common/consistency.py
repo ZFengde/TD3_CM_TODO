@@ -84,9 +84,7 @@ class Consistency_Model:
         state=None,
         target_model=None,
         noise=None,
-        score_function=None,
     ):
-
         noise = th.randn_like(x_start) # make this noise a \nabla[Q(s, a)]
         dims = x_start.ndim
 
@@ -128,13 +126,22 @@ class Consistency_Model:
         consistency_diffs = (distiller - distiller_target) ** 2 # get the consistency difference
         consistency_loss = mean_flat(consistency_diffs) * weights # weighted average as loss
 
-        recon_diffs = (distiller - x_start) ** 2 # this is reconstruction loss
-        recon_loss = mean_flat(recon_diffs) * weights
+        # === 新增对比损失，基于不同噪声 === 
+        noise_diff = th.randn_like(x_start)  # 生成不同的噪声
+        x_t_diff = x_start + noise_diff * append_dims(t, dims)
+        
+        distiller_diff = target_denoise_fn(x_t_diff, t, state) # 计算不同噪声下生成的动作
+        noise_distance = (noise - noise_diff) ** 2 # 计算噪声之间的距离
+        output_distance = (distiller - distiller_diff) ** 2 # 对比损失，噪声差异越大，输出的差异也应该越大
+        margin = 1.0  # 基础阈值
+
+        # 确保输出距离与噪声距离一致，避免过大或过小, # TODO, check here
+        contrastive_diffs = th.relu((noise_distance + margin) - output_distance)
+        contrastive_loss = mean_flat(contrastive_diffs) * weights # weighted average as loss
 
         terms = {}
-        terms["loss"] = recon_loss
         terms["consistency_loss"] = consistency_loss
-        terms["recon_loss"] = recon_loss
+        # terms["consistency_loss"] = consistency_loss + contrastive_loss
 
         return terms
 

@@ -127,6 +127,8 @@ class TD3(OffPolicyAlgorithm):
                 # Compute the next Q-values: min over all critics targets
                 next_q_values = th.cat(self.critic_target(replay_data.next_observations, next_actions), dim=1)
                 next_q_values, _ = th.min(next_q_values, dim=1, keepdim=True)
+                # # add entropy term
+                # next_q_values = next_q_values - ent_coef * next_log_prob.reshape(-1, 1)
                 target_q_values = replay_data.rewards + (1 - replay_data.dones) * self.gamma * next_q_values
 
             # Get current Q-values estimates for each critic network
@@ -154,7 +156,6 @@ class TD3(OffPolicyAlgorithm):
                                               )
                 bc_losses = compute_bc_losses() # but here take loss rather than consistency_loss
                 actor_loss = bc_losses["consistency_loss"].mean() - self.critic.q1_forward(replay_data.observations, sampled_action).mean()
-                # actor_loss = - self.critic.q1_forward(replay_data.observations, sampled_action).mean()
                 actor_losses.append(actor_loss.item())
 
                 # Optimize the actor
@@ -198,7 +199,7 @@ class TD3(OffPolicyAlgorithm):
         state_dicts = ["policy", "actor.optimizer", "critic.optimizer"]
         return state_dicts, []
     
-    def test(self, env, episode_num):
+    def test(self, env):
         import matplotlib.pyplot as plt
         from mpl_toolkits.mplot3d import Axes3D
         # 这里假设 action 是 50x3 的张量，代表 50 个 3D 坐标
@@ -211,30 +212,31 @@ class TD3(OffPolicyAlgorithm):
 
         # 将 action 转换为 numpy 数组（如果是 tensor）
         action = action.cpu().numpy()
+        a = 1
 
-        # 分解动作的 x, y, z 坐标
-        x = action[:, 0]
-        y = action[:, 1]
-        z = action[:, 2]
+        # # 分解动作的 x, y, z 坐标
+        # x = action[:, 0]
+        # y = action[:, 1]
+        # z = action[:, 2]
 
-        # 创建 3D 图
-        fig = plt.figure()
-        ax = fig.add_subplot(111, projection='3d')
+        # # 创建 3D 图
+        # fig = plt.figure()
+        # ax = fig.add_subplot(111, projection='3d')
 
-        # 根据每个动作的模长来设置颜色（你也可以根据其他属性来设定）
-        colors = np.linalg.norm(action, axis=1)  # 计算每个动作的模长
-        sc = ax.scatter(x, y, z, c=colors, cmap='viridis', marker='o')
+        # # 根据每个动作的模长来设置颜色（你也可以根据其他属性来设定）
+        # colors = np.linalg.norm(action, axis=1)  # 计算每个动作的模长
+        # sc = ax.scatter(x, y, z, c=colors, cmap='viridis', marker='o')
 
-        # 设置 x, y, z 轴的范围 [-1, 1]
-        ax.set_xlim([-1, 1])
-        ax.set_ylim([-1, 1])
-        ax.set_zlim([-1, 1])
-        # 添加颜色条
-        plt.colorbar(sc)
+        # # 设置 x, y, z 轴的范围 [-1, 1]
+        # ax.set_xlim([-1, 1])
+        # ax.set_ylim([-1, 1])
+        # ax.set_zlim([-1, 1])
+        # # 添加颜色条
+        # plt.colorbar(sc)
 
-        # 添加标题
-        ax.set_title('3D Action Visualization')
-        print(q_value)
-        # 显示图形
-        plt.show()
+        # # 添加标题
+        # ax.set_title('3D Action Visualization')
+        # print(q_value)
+        # # 显示图形
+        # plt.show()
         a = 1
