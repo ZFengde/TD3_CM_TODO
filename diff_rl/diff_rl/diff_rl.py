@@ -155,7 +155,10 @@ class TD3(OffPolicyAlgorithm):
                                               state=replay_data.observations,
                                               )
                 bc_losses = compute_bc_losses() # but here take loss rather than consistency_loss
-                actor_loss = bc_losses["consistency_loss"].mean() - self.critic.q1_forward(replay_data.observations, sampled_action).mean()
+                actor_loss = bc_losses["consistency_loss"].mean() \
+                            + bc_losses["consistency_loss"].mean() \
+                            - self.critic.q1_forward(replay_data.observations, sampled_action).mean()
+
                 actor_losses.append(actor_loss.item())
 
                 # Optimize the actor
@@ -214,29 +217,29 @@ class TD3(OffPolicyAlgorithm):
         action = action.cpu().numpy()
         a = 1
 
-        # # 分解动作的 x, y, z 坐标
-        # x = action[:, 0]
-        # y = action[:, 1]
-        # z = action[:, 2]
+        # 分解动作的 x, y, z 坐标
+        x = action[:, 0]
+        y = action[:, 4]
+        z = action[:, 10]
 
-        # # 创建 3D 图
-        # fig = plt.figure()
-        # ax = fig.add_subplot(111, projection='3d')
+        # 创建 3D 图
+        fig = plt.figure()
+        ax = fig.add_subplot(111, projection='3d')
 
-        # # 根据每个动作的模长来设置颜色（你也可以根据其他属性来设定）
-        # colors = np.linalg.norm(action, axis=1)  # 计算每个动作的模长
-        # sc = ax.scatter(x, y, z, c=colors, cmap='viridis', marker='o')
+        # 根据每个动作的模长来设置颜色（你也可以根据其他属性来设定）
+        colors = np.linalg.norm(action, axis=1)  # 计算每个动作的模长
+        sc = ax.scatter(x, y, z, c=colors, cmap='viridis', marker='o')
 
-        # # 设置 x, y, z 轴的范围 [-1, 1]
-        # ax.set_xlim([-1, 1])
-        # ax.set_ylim([-1, 1])
-        # ax.set_zlim([-1, 1])
-        # # 添加颜色条
-        # plt.colorbar(sc)
+        # 设置 x, y, z 轴的范围 [-1, 1]
+        ax.set_xlim([-1, 1])
+        ax.set_ylim([-1, 1])
+        ax.set_zlim([-1, 1])
+        # 添加颜色条
+        plt.colorbar(sc)
 
-        # # 添加标题
-        # ax.set_title('3D Action Visualization')
-        # print(q_value)
-        # # 显示图形
-        # plt.show()
+        # 添加标题
+        ax.set_title('3D Action Visualization')
+        print(q_value)
+        # 显示图形
+        plt.show()
         a = 1

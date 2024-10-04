@@ -1,6 +1,7 @@
 
 import torch as th
 import numpy as np
+import torch.nn.functional as F
 
 from diff_rl.common.helpers import append_dims, append_zero, mean_flat
 from stable_baselines3.common.preprocessing import get_action_dim
@@ -122,26 +123,24 @@ class Consistency_Model:
 
         snrs = self.get_snr(t) # sigmas**-2
         weights = get_weightings(self.weight_schedule, snrs, self.sigma_data) # lambda(t_n), get different weights based on snrs: snrs + 1.0 / sigma_data**-2
-
+        # t 越小， weights越大
         consistency_diffs = (distiller - distiller_target) ** 2 # get the consistency difference
         consistency_loss = mean_flat(consistency_diffs) * weights # weighted average as loss
 
-        # === 新增对比损失，基于不同噪声 === 
+        # === 新增对比损失，基于不同噪声 === # TODO, use F.cosine_similarity(z_i, z_j, dim=-1) here
         noise_diff = th.randn_like(x_start)  # 生成不同的噪声
         x_t_diff = x_start + noise_diff * append_dims(t, dims)
         
         distiller_diff = target_denoise_fn(x_t_diff, t, state) # 计算不同噪声下生成的动作
-        noise_distance = (noise - noise_diff) ** 2 # 计算噪声之间的距离
+        noise_similarity = F.cosine_similarity(noise, noise_diff, dim=-1) # [-1, 1], 1: same, -1: rever, 0: vertical 
         output_distance = (distiller - distiller_diff) ** 2 # 对比损失，噪声差异越大，输出的差异也应该越大
-        margin = 1.0  # 基础阈值
-
-        # 确保输出距离与噪声距离一致，避免过大或过小, # TODO, check here
-        contrastive_diffs = th.relu((noise_distance + margin) - output_distance)
-        contrastive_loss = mean_flat(contrastive_diffs) * weights # weighted average as loss
+        a = (1 - noise_similarity) / 2
+        # TODO, check if should use weights or 1/weights
+        contrastive_loss = - mean_flat(output_distance) * weights * (1 - noise_similarity)# weighted average as loss
 
         terms = {}
         terms["consistency_loss"] = consistency_loss
-        # terms["consistency_loss"] = consistency_loss + contrastive_loss
+        terms["contrastive_loss"] = contrastive_loss
 
         return terms
 
