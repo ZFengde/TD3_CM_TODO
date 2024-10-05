@@ -156,7 +156,7 @@ class TD3(OffPolicyAlgorithm):
                                               )
                 bc_losses = compute_bc_losses() # but here take loss rather than consistency_loss
                 actor_loss = bc_losses["consistency_loss"].mean() \
-                            + bc_losses["consistency_loss"].mean() \
+                            + bc_losses["contrastive_loss"].mean() \
                             - self.critic.q1_forward(replay_data.observations, sampled_action).mean()
 
                 actor_losses.append(actor_loss.item())
