@@ -120,9 +120,10 @@ class TD3(OffPolicyAlgorithm):
 
             with th.no_grad():
                 # Select action according to policy and add clipped noise
-                noise = replay_data.actions.clone().data.normal_(0, self.target_policy_noise)
-                noise = noise.clamp(-self.target_noise_clip, self.target_noise_clip) # here is the [-1, 1] action
-                next_actions = (self.consistency_model.sample(model=self.actor_target, state=replay_data.next_observations) + noise).clamp(-1, 1)
+                # noise = replay_data.actions.clone().data.normal_(0, self.target_policy_noise)
+                # noise = noise.clamp(-self.target_noise_clip, self.target_noise_clip) # here is the [-1, 1] action
+                # next_actions = (self.consistency_model.sample(model=self.actor_target, state=replay_data.next_observations) + noise).clamp(-1, 1)
+                next_actions = self.consistency_model.sample(model=self.actor_target, state=replay_data.next_observations)
 
                 next_state_rpt = th.repeat_interleave(replay_data.next_observations.unsqueeze(1), repeats=50, dim=1)
                 scaled_next_action = self.consistency_model.batch_multi_sample(model=self.actor, state=next_state_rpt)
