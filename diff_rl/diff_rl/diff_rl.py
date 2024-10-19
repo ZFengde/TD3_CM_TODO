@@ -136,7 +136,7 @@ class TD3(OffPolicyAlgorithm):
                     0.5 * next_residual ** 2, 
                     self.delta * (th.abs(next_residual) - 0.5 * self.delta)).mean(dim=1).reshape(-1, 1)
 
-                next_z_scores = (-(next_actions - next_cm_mean)**2/2).mean(dim=1).reshape(-1, 1)
+                # next_z_scores = (-(next_actions - next_cm_mean)**2/2).mean(dim=1).reshape(-1, 1)
 
                 # Compute the next Q-values: min over all critics targets
                 next_q_values = th.cat(self.critic_target(replay_data.next_observations, next_actions), dim=1)
@@ -180,7 +180,7 @@ class TD3(OffPolicyAlgorithm):
                     th.abs(next_residual) <= self.delta,
                     0.5 * residual ** 2, 
                     self.delta * (th.abs(residual) - 0.5 * self.delta)).mean(dim=1).reshape(-1, 1)
-                # actor_loss = bc_losses["consistency_loss"].mean() - self.critic.q1_forward(replay_data.observations, sampled_action).mean() - 0.1 * z_scores.mean()
+                # actor_loss = bc_losses["consistency_loss"].mean() - self.critic.q1_forward(replay_data.observations, sampled_action).mean() + 0.1 * z_scores.mean()
                 actor_loss = bc_losses["consistency_loss"].mean() - self.critic.q1_forward(replay_data.observations, sampled_action).mean() + 0.1 * huber_distance.mean()
                 actor_losses.append(actor_loss.item())
 
