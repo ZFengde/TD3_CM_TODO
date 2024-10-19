@@ -3,6 +3,7 @@ from typing import Any, ClassVar, Dict, List, Optional, Tuple, Type, TypeVar, Un
 import functools
 import numpy as np
 import torch as th
+import torch.nn as nn
 from gymnasium import spaces
 from torch.nn import functional as F
 
@@ -85,6 +86,7 @@ class TD3(OffPolicyAlgorithm):
         self.policy_delay = policy_delay
         self.target_noise_clip = target_noise_clip
         self.target_policy_noise = target_policy_noise
+        self.delta = 0.5
         
         if _init_setup_model:
             self._setup_model()
@@ -120,20 +122,28 @@ class TD3(OffPolicyAlgorithm):
 
             with th.no_grad():
                 # Select action according to policy and add clipped noise
-                # noise = replay_data.actions.clone().data.normal_(0, self.target_policy_noise)
-                # noise = noise.clamp(-self.target_noise_clip, self.target_noise_clip) # here is the [-1, 1] action
-                # next_actions = (self.consistency_model.sample(model=self.actor_target, state=replay_data.next_observations) + noise).clamp(-1, 1)
-                next_actions = self.consistency_model.sample(model=self.actor_target, state=replay_data.next_observations)
+                noise = replay_data.actions.clone().data.normal_(0, self.target_policy_noise)
+                noise = noise.clamp(-self.target_noise_clip, self.target_noise_clip) # here is the [-1, 1] action
 
+                next_actions = (self.consistency_model.sample(model=self.actor_target, state=replay_data.next_observations) + noise).clamp(-1, 1)
                 next_state_rpt = th.repeat_interleave(replay_data.next_observations.unsqueeze(1), repeats=50, dim=1)
                 scaled_next_action = self.consistency_model.batch_multi_sample(model=self.actor, state=next_state_rpt)
+
                 next_cm_mean = scaled_next_action.mean(dim=1)
-                next_z_scores = (-(next_actions - next_cm_mean)**2/2).mean(dim=1).reshape(-1, 1)
+                next_residual = next_actions - next_cm_mean
+                next_huber_distance = -th.where(
+                    th.abs(next_residual) <= self.delta,
+                    0.5 * next_residual ** 2, 
+                    self.delta * (th.abs(next_residual) - 0.5 * self.delta)).mean(dim=1).reshape(-1, 1)
+
+                # next_z_scores = (-(next_actions - next_cm_mean)**2/2).mean(dim=1).reshape(-1, 1)
+
                 # Compute the next Q-values: min over all critics targets
                 next_q_values = th.cat(self.critic_target(replay_data.next_observations, next_actions), dim=1)
                 next_q_values, _ = th.min(next_q_values, dim=1, keepdim=True)
                 # add entropy term
-                next_q_values = next_q_values - 0.1 * next_z_scores
+                # next_q_values = next_q_values - 0.1 * next_z_scores
+                next_q_values = next_q_values - 0.1 * next_huber_distance
                 target_q_values = replay_data.rewards + (1 - replay_data.dones) * self.gamma * next_q_values
 
             # Get current Q-values estimates for each critic network
@@ -165,7 +175,13 @@ class TD3(OffPolicyAlgorithm):
                 scaled_action = self.consistency_model.batch_multi_sample(model=self.actor, state=state_rpt)
                 cm_mean = scaled_action.mean(dim=1)
                 z_scores = ((-(sampled_action - cm_mean)**2/2).mean(dim=1)).mean()
-                actor_loss = bc_losses["consistency_loss"].mean() - self.critic.q1_forward(replay_data.observations, sampled_action).mean() - 0.1 * z_scores
+                residual = sampled_action - cm_mean
+                huber_distance = -th.where(
+                    th.abs(next_residual) <= self.delta,
+                    0.5 * residual ** 2, 
+                    self.delta * (th.abs(residual) - 0.5 * self.delta)).mean(dim=1).reshape(-1, 1)
+                # actor_loss = bc_losses["consistency_loss"].mean() - self.critic.q1_forward(replay_data.observations, sampled_action).mean() - 0.1 * z_scores
+                actor_loss = bc_losses["consistency_loss"].mean() - self.critic.q1_forward(replay_data.observations, sampled_action).mean() - 0.1 * huber_distance.mean()
                 actor_losses.append(actor_loss.item())
 
                 # Optimize the actor
