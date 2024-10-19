@@ -37,8 +37,6 @@ def main(env_id,
 				tensorboard_log=logdir,
 				seed=seed,
 				learning_rate=learning_rate)
-	modelpath = f"./good"
-	model.load(modelpath)
 	for i in range(iter_num):
 		model.learn(reset_num_timesteps=False, tb_log_name=f"{algo_name}")
 		model.save(modeldir, f'{i * model.buffer_size}')
