@@ -142,8 +142,8 @@ class TD3(OffPolicyAlgorithm):
                 next_q_values = th.cat(self.critic_target(replay_data.next_observations, next_actions), dim=1)
                 next_q_values, _ = th.min(next_q_values, dim=1, keepdim=True)
                 # add entropy term
-                # next_q_values = next_q_values - 0.1 * next_z_scores
-                next_q_values = next_q_values - 0.1 * next_huber_distance
+                # next_q_values = next_q_values - 0.3 * next_z_scores
+                next_q_values = next_q_values - 0.3 * next_huber_distance
                 target_q_values = replay_data.rewards + (1 - replay_data.dones) * self.gamma * next_q_values
 
             # Get current Q-values estimates for each critic network
@@ -180,8 +180,8 @@ class TD3(OffPolicyAlgorithm):
                     th.abs(next_residual) <= self.delta,
                     0.5 * residual ** 2, 
                     self.delta * (th.abs(residual) - 0.5 * self.delta)).mean(dim=1).reshape(-1, 1)
-                # actor_loss = bc_losses["consistency_loss"].mean() - self.critic.q1_forward(replay_data.observations, sampled_action).mean() + 0.1 * z_scores.mean()
-                actor_loss = bc_losses["consistency_loss"].mean() - self.critic.q1_forward(replay_data.observations, sampled_action).mean() + 0.1 * huber_distance.mean()
+                # actor_loss = bc_losses["consistency_loss"].mean() - self.critic.q1_forward(replay_data.observations, sampled_action).mean() + 0.3 * z_scores.mean()
+                actor_loss = bc_losses["consistency_loss"].mean() - self.critic.q1_forward(replay_data.observations, sampled_action).mean() + 0.3 * huber_distance.mean()
                 actor_losses.append(actor_loss.item())
 
                 # Optimize the actor
