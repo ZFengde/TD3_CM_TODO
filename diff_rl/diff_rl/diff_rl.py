@@ -87,7 +87,9 @@ class TD3(OffPolicyAlgorithm):
         self.target_noise_clip = target_noise_clip
         self.target_policy_noise = target_policy_noise
         self.delta = 0.5
-        
+        self.huber_coef = 1.0
+        self.target_huber_distance = -3.0
+
         if _init_setup_model:
             self._setup_model()
 
@@ -99,7 +101,15 @@ class TD3(OffPolicyAlgorithm):
         self.critic_batch_norm_stats = get_parameters_by_name(self.critic, ["running_"])
         self.actor_batch_norm_stats_target = get_parameters_by_name(self.actor_target, ["running_"])
         self.critic_batch_norm_stats_target = get_parameters_by_name(self.critic_target, ["running_"])
+        self.target_huber = float(-np.prod(self.env.action_space.shape).astype(np.float32)) 
 
+        # Default initial value of ent_coef when learned
+        init_value = 1.0
+
+        # Note: we optimize the log of the entropy coeff which is slightly different from the paper
+        # as discussed in https://github.com/rail-berkeley/softlearning/issues/37
+        self.log_huber_coef = th.log(th.ones(1, device=self.device) * init_value).requires_grad_(True)
+        self.huber_coef_optimizer = th.optim.Adam([self.log_huber_coef], lr=self.lr_schedule(1))
 
     def _create_aliases(self):
         self.actor = self.policy.actor
@@ -111,14 +121,41 @@ class TD3(OffPolicyAlgorithm):
         # Switch to train mode (this affects batch norm / dropout)
         self.policy.set_training_mode(True)
 
+        optimizers = [self.actor.optimizer, self.critic.optimizer]
+        optimizers += [self.huber_coef_optimizer]
         # Update learning rate according to lr schedule
         self._update_learning_rate([self.actor.optimizer, self.critic.optimizer])
 
+        huber_coef_losses, huber_coefs = [], []
         actor_losses, critic_losses = [], []
+
         for _ in range(gradient_steps):
             self._n_updates += 1
             # Sample replay buffer
             replay_data = self.replay_buffer.sample(batch_size, env=self._vec_normalize_env)  # type: ignore[union-attr]
+
+            sampled_action = self.consistency_model.sample(model=self.actor, state=replay_data.observations)
+            state_rpt = th.repeat_interleave(replay_data.observations.unsqueeze(1), repeats=50, dim=1)
+            scaled_action = self.consistency_model.batch_multi_sample(model=self.actor, state=state_rpt)
+            cm_mean = scaled_action.mean(dim=1)
+
+            residual = sampled_action - cm_mean
+            huber_distance = - th.where(
+                th.abs(residual) <= self.delta,
+                0.5 * residual ** 2, 
+                self.delta * (th.abs(residual) - 0.5 * self.delta)).mean(dim=1).reshape(-1, 1)
+
+            # so we don't change it with other losses
+            # see https://github.com/rail-berkeley/softlearning/issues/60
+            huber_coef = th.exp(self.log_huber_coef.detach())
+            huber_coef_loss = -(self.log_huber_coef * (huber_distance + self.target_huber_distance).detach()).mean()
+
+            huber_coef_losses.append(huber_coef_loss.item())
+            huber_coefs.append(huber_coef.item())
+
+            self.huber_coef_optimizer.zero_grad()
+            huber_coef_loss.backward()
+            self.huber_coef_optimizer.step()
 
             with th.no_grad():
                 # Select action according to policy and add clipped noise
@@ -136,14 +173,11 @@ class TD3(OffPolicyAlgorithm):
                     0.5 * next_residual ** 2, 
                     self.delta * (th.abs(next_residual) - 0.5 * self.delta)).mean(dim=1).reshape(-1, 1)
 
-                # next_z_scores = (-(next_actions - next_cm_mean)**2/2).mean(dim=1).reshape(-1, 1)
-
                 # Compute the next Q-values: min over all critics targets
                 next_q_values = th.cat(self.critic_target(replay_data.next_observations, next_actions), dim=1)
                 next_q_values, _ = th.min(next_q_values, dim=1, keepdim=True)
                 # add entropy term
-                # next_q_values = next_q_values - 0.3 * next_z_scores
-                next_q_values = next_q_values - 0.3 * next_huber_distance
+                next_q_values = next_q_values - huber_coef * next_huber_distance
                 target_q_values = replay_data.rewards + (1 - replay_data.dones) * self.gamma * next_q_values
 
             # Get current Q-values estimates for each critic network
@@ -161,7 +195,6 @@ class TD3(OffPolicyAlgorithm):
 
             # Delayed policy updates
             if self._n_updates % self.policy_delay == 0:
-                sampled_action = self.consistency_model.sample(model=self.actor, state=replay_data.observations)
                 compute_bc_losses = functools.partial(self.consistency_model.consistency_losses,
                                               model=self.actor,
                                               x_start=replay_data.actions,
@@ -171,17 +204,7 @@ class TD3(OffPolicyAlgorithm):
                                               )
                 bc_losses = compute_bc_losses() # but here take loss rather than consistency_loss
 
-                state_rpt = th.repeat_interleave(replay_data.observations.unsqueeze(1), repeats=50, dim=1)
-                scaled_action = self.consistency_model.batch_multi_sample(model=self.actor, state=state_rpt)
-                cm_mean = scaled_action.mean(dim=1)
-                # z_scores = ((-(sampled_action - cm_mean)**2/2).mean(dim=1))
-                residual = sampled_action - cm_mean
-                huber_distance = - th.where(
-                    th.abs(next_residual) <= self.delta,
-                    0.5 * residual ** 2, 
-                    self.delta * (th.abs(residual) - 0.5 * self.delta)).mean(dim=1).reshape(-1, 1)
-                # actor_loss = bc_losses["consistency_loss"].mean() - self.critic.q1_forward(replay_data.observations, sampled_action).mean() + 0.3 * z_scores.mean()
-                actor_loss = bc_losses["consistency_loss"].mean() - self.critic.q1_forward(replay_data.observations, sampled_action).mean() + 0.3 * huber_distance.mean()
+                actor_loss = (bc_losses["consistency_loss"] - self.critic.q1_forward(replay_data.observations, sampled_action) + huber_coef * huber_distance).mean()
                 actor_losses.append(actor_loss.item())
 
                 # Optimize the actor
@@ -199,6 +222,9 @@ class TD3(OffPolicyAlgorithm):
         if len(actor_losses) > 0:
             self.logger.record("train/actor_loss", np.mean(actor_losses))
         self.logger.record("train/critic_loss", np.mean(critic_losses))
+        self.logger.record("train/huber_coefs", np.mean(huber_coefs))
+        if len(huber_coef_losses) > 0:
+            self.logger.record("train/ent_coef_loss", np.mean(huber_coef_losses))
 
     def learn(
         self: SelfTD3,
