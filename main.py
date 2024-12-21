@@ -50,7 +50,7 @@ if __name__ == '__main__':
     parser.add_argument('--specified_log_name', type=str, default=None) 
     parser.add_argument('--n_envs', type=int, default=1)
     parser.add_argument('--iter_num', type=int, default=2) # One iter will be timestep=batch_size=1e6
-    parser.add_argument('--seed', type=int, default=5)
+    parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--learning_rate', type=float, default=3e-4)
     args = parser.parse_args()
 

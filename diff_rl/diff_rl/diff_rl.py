@@ -99,7 +99,7 @@ class TD3(OffPolicyAlgorithm):
         self.critic_batch_norm_stats = get_parameters_by_name(self.critic, ["running_"])
         self.actor_batch_norm_stats_target = get_parameters_by_name(self.actor_target, ["running_"])
         self.critic_batch_norm_stats_target = get_parameters_by_name(self.critic_target, ["running_"])
-        self.target_huber_distance = float(-np.prod(self.env.action_space.shape).astype(np.float32)) 
+        self.target_huber_distance = float(-np.prod(self.env.action_space.shape).astype(np.float32))
 
         # Default initial value of ent_coef when learned
         init_value = 1.0
@@ -139,16 +139,15 @@ class TD3(OffPolicyAlgorithm):
             cm_mean = scaled_action.mean(dim=1)
 
             residual = sampled_action - cm_mean
-            # TODO, This value is always too small
             huber_distance = th.where(
                 th.abs(residual) <= self.delta, # condition
                 0.5 * residual ** 2, # then it equals to this, otherwise
                 self.delta * (th.abs(residual) - 0.5 * self.delta)).sum(dim=1).reshape(-1, 1)
 
-            # so we don't change it with other losses, TODO, check here
-            # see https://github.com/rail-berkeley/softlearning/issues/60
+            # Check the sign of huber_distance here by comparing with SAC
             huber_coef = th.exp(self.log_huber_coef.detach())
             huber_coef_loss = -(self.log_huber_coef * (huber_distance + self.target_huber_distance).detach()).mean()
+            # huber_coef_loss = -(self.log_huber_coef * (huber_distance - 0.05).detach()).mean()
             # huber_distance get larger, then huber_coef get smaller
 
             huber_coef_losses.append(huber_coef_loss.item())
@@ -191,6 +190,7 @@ class TD3(OffPolicyAlgorithm):
 
             # Optimize the critics
             self.critic.optimizer.zero_grad()
+            th.nn.utils.clip_grad_norm_(self.critic.parameters(), 0.5)
             critic_loss.backward()
             self.critic.optimizer.step()
 
@@ -208,8 +208,8 @@ class TD3(OffPolicyAlgorithm):
 
                 # TODO, consistency loss need to be modify here, since it's actually a regression learning
                 # which take actions from buffer as the ground truth
-                # actor_loss = (bc_losses["consistency_loss"] - self.critic.q1_forward(replay_data.observations, sampled_action) - huber_coef * huber_distance).mean()
-                actor_loss = (- huber_coef * huber_distance).mean()
+                actor_loss = (bc_losses["consistency_loss"] - self.critic.q1_forward(replay_data.observations, sampled_action) - huber_coef * huber_distance).mean()
+                # actor_loss = (- huber_coef * huber_distance).mean()
                 actor_losses.append(actor_loss.item())
 
                 # Optimize the actor
